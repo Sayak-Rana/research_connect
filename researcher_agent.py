@@ -86,13 +86,20 @@ def get_top_researchers(topic: str, top_k: int = 3) -> str:
 # TOOL 2: Send Email (with dynamic receiver list)
 # ---------------------------------------------------
 def send_mail(ans: str, subject: str = "Top Researchers - Auto Update", receivers: list[str] = None) -> str:
+    """
+    Sends an email to the given receivers.
+
+    Parameters:
+    - ans: str → The full email body text (customized by user or default)
+    - subject: str → The email subject
+    - receivers: list[str] → List of recipient email addresses
+    """
     app_pass = os.environ.get("MAIL_APP_PASS")
     if not app_pass:
         app_pass = getpass.getpass("Enter Gmail App Password (won't echo): ")
 
     sender = "rana.sayak.2001@gmail.com"
 
-    # Allow dynamic receivers from frontend
     if not receivers:
         receivers = [
             "sayakrana108@gmail.com",
@@ -100,21 +107,24 @@ def send_mail(ans: str, subject: str = "Top Researchers - Auto Update", receiver
             "rana.sayak.2001@gmail.com"
         ]
 
-    yag = yagmail.SMTP(sender, app_pass)
-
-    for r in receivers:
-        body = f"""
+    # If user left body empty, fall back to default message
+    if not ans or ans.strip() == "":
+        ans = """
 Hi,
 
 This is an automated message from the Research Connect app.
-Below are the top researchers found for your requested topic:
 
-{ans}
+We found the top researchers for your requested topic.
+Please find their details in the attached summary.
 
 Best regards,
 Sayak Rana
 """
-        yag.send(to=r, subject=subject, contents=body)
+
+    yag = yagmail.SMTP(sender, app_pass)
+
+    for r in receivers:
+        yag.send(to=r, subject=subject, contents=ans)
         print(f"[MAIL SENT] → {r}")
 
     return f"Emails sent successfully to: {', '.join(receivers)}"

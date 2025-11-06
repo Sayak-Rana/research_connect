@@ -1,6 +1,7 @@
 streamlit
 agno
 google-generativeai
+google-genai
 google-search-results
 yagmail
 python-dotenv

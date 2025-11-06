@@ -1,0 +1,6 @@
+streamlit
+agno
+google-generativeai
+google-search-results
+yagmail
+python-dotenv

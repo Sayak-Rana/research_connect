@@ -149,159 +149,131 @@ Sayak Rana
     return f"Emails sent successfully to: {', '.join(receivers)}"
 
 
+import requests
 import re
-import json
+from bs4 import BeautifulSoup
 from agno.agent import Agent
 from agno.models.google import Gemini
+from agno.tool import Tool
 
-def get_top_researchers_gemini(topic: str, top_k: int = 3) -> str:
-    """
-    Uses Gemini's web search to find top researchers for a given topic.
-    More reliable and direct than SerpAPI.
-    """
-    print(f"[DEBUG] Searching for researchers in: {topic!r}")
+class ResearcherSearchTool(Tool):
+    name: str = "search_researchers"
+    description: str = "Search for top academic researchers in a specific field"
     
-    gemini_api_key = os.environ.get("GEMINI_API_KEY", "")
-    if not gemini_api_key:
-        return "ERROR: GEMINI_API_KEY not found in environment variables."
-
-    # Create agent with web search enabled
-    search_agent = Agent(
-        model=Gemini(
-            id="gemini-2.5-flash", 
-            api_key=gemini_api_key
-        ),
-        description="Search the web for top researchers in specific fields",
-        markdown=True,
-        # Enable web search
-        model_kwargs={"google_search": True}
-    )
-
-    prompt = f"""
-Search the web for the top {top_k} most prominent researchers in the field of: {topic}
-
-For each researcher, find and return:
-1. Full name (exactly as known in academic circles)
-2. Primary affiliation (university/institution)
-3. Google Scholar profile URL
-4. Primary email address (if available)
-
-Please search authoritative sources like:
-- Google Scholar profiles
-- University faculty pages
-- Professional academic databases
-
-Return the results in this exact JSON format:
-{{
-    "researchers": [
-        {{
-            "name": "Full Name",
-            "affiliation": "University/Institution", 
-            "scholar_profile": "https://scholar.google.com/...",
-            "email": "email@university.edu"
-        }}
-    ]
-}}
-
-If email is not found, use null for the email field.
-Ensure all names are accurate and profiles are valid Google Scholar links.
-"""
-
-    try:
-        response = search_agent.run(prompt)
-        result_text = response.content.strip()
+    def invoke(self, agent: Agent, topic: str, top_k: int = 3) -> str:
+        """
+        Find top researchers using DuckDuckGo search
         
-        print(f"[DEBUG] Raw Gemini response: {result_text}")
+        Args:
+            topic: Research field or topic
+            top_k: Number of top researchers to return (default: 3)
+        """
+        # Use DuckDuckGo's HTML interface
+        url = "https://html.duckduckgo.com/html/"
+        params = {
+            'q': f'{topic} "Google Scholar"',
+            'kl': 'us-en'
+        }
         
-        # Clean the response to extract JSON
-        if "```json" in result_text:
-            json_str = result_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in result_text:
-            json_str = result_text.split("```")[1].strip()
-        else:
-            json_str = result_text
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        
+        try:
+            response = requests.post(url, data=params, headers=headers, timeout=15)
+            soup = BeautifulSoup(response.text, 'html.parser')
             
-        # Parse JSON
-        data = json.loads(json_str)
-        researchers = data.get("researchers", [])
-        
-        if not researchers:
-            return "No researchers found for this topic."
-        
-        # Create markdown table
-        markdown_table = "| Rank | Name | Affiliation | Email | Scholar Profile |\n"
-        markdown_table += "|------|------|-------------|--------|-----------------|\n"
-        
-        for i, researcher in enumerate(researchers[:top_k], 1):
-            name = researcher.get("name", "Unknown")
-            affiliation = researcher.get("affiliation", "Not specified")
-            email = researcher.get("email", "(not found)")
-            scholar_profile = researcher.get("scholar_profile", "#")
+            researchers = []
             
-            markdown_table += f"| {i} | {name} | {affiliation} | {email} | [Profile]({scholar_profile}) |\n"
+            # Find all search results
+            results = soup.find_all('div', class_='result')
+            
+            for result in results[:10]:
+                title_elem = result.find('a', class_='result__a')
+                if title_elem:
+                    title = title_elem.get_text()
+                    link = title_elem.get('href')
+                    
+                    # Extract name from title
+                    name = self.extract_name_from_title(title)
+                    
+                    if name and name != "Unknown":
+                        snippet_elem = result.find('a', class_='result__snippet')
+                        snippet = snippet_elem.get_text() if snippet_elem else ""
+                        
+                        # Extract email if available
+                        email = self.extract_email(snippet)
+                        
+                        researchers.append({
+                            'name': name,
+                            'email': email,
+                            'profile_url': link,
+                            'info': snippet
+                        })
+            
+            if not researchers:
+                return f"No researchers found for '{topic}'."
+            
+            # Remove duplicates and get top K
+            unique_researchers = []
+            seen_names = set()
+            for researcher in researchers:
+                if researcher['name'] not in seen_names:
+                    unique_researchers.append(researcher)
+                    seen_names.add(researcher['name'])
+            
+            researchers_to_display = unique_researchers[:top_k]
+            
+            return self.create_researcher_table(researchers_to_display, topic)
+            
+        except Exception as e:
+            return f"Search error: {str(e)}"
+
+    def extract_name_from_title(self, title: str) -> str:
+        """Extract researcher name from search result title."""
+        clean_title = re.sub(r' - Google Scholar| \| Google Scholar', '', title)
+        name_match = re.search(r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})', clean_title)
+        if name_match:
+            name = name_match.group(1).strip()
+            if name and len(name) > 4:
+                return name
+        return "Unknown"
+
+    def extract_email(self, text: str) -> str:
+        """Extract email address from text if available."""
+        email_match = re.search(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', text)
+        return email_match.group(0) if email_match else "Not available"
+
+    def create_researcher_table(self, researchers, topic):
+        """Create a clean markdown table."""
+        markdown_table = f"## Top Researchers in {topic}\n\n"
+        markdown_table += "| Name | Email | Profile Link | Information |\n"
+        markdown_table += "|------|-------|-------------|-------------|\n"
+        
+        for researcher in researchers:
+            name = researcher['name']
+            email = researcher['email']
+            profile_url = researcher['profile_url']
+            info = researcher['info'][:100] + "..." if len(researcher['info']) > 100 else researcher['info']
+            
+            markdown_table += f"| {name} | {email} | [View Profile]({profile_url}) | {info} |\n"
         
         return markdown_table
-        
-    except json.JSONDecodeError as e:
-        print(f"[ERROR] Failed to parse JSON: {e}")
-        # Fallback: try to extract information from text
-        return extract_researchers_from_text(result_text, top_k)
-    except Exception as e:
-        print(f"[ERROR] Search failed: {e}")
-        return f"Error searching for researchers: {str(e)}"
 
-def extract_researchers_from_text(text: str, top_k: int) -> str:
-    """
-    Fallback method to extract researcher information from free text.
-    """
-    # Simple pattern matching for names and profiles
-    lines = text.split('\n')
-    researchers = []
-    
-    current_researcher = {}
-    
-    for line in lines:
-        line = line.strip()
-        
-        # Look for name patterns (typically at start of lines or after numbers)
-        if re.match(r'^[A-Z][a-z]+ [A-Z][a-z]+', line) and len(line.split()) <= 4:
-            if current_researcher:
-                researchers.append(current_researcher)
-            current_researcher = {"name": line}
-        
-        # Look for affiliations (common university patterns)
-        elif any(keyword in line.lower() for keyword in ['university', 'institute', 'college', 'lab']):
-            current_researcher["affiliation"] = line
-        
-        # Look for email addresses
-        elif re.search(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', line):
-            current_researcher["email"] = re.findall(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', line)[0]
-        
-        # Look for Google Scholar URLs
-        elif 'scholar.google.com' in line:
-            urls = re.findall(r'https?://scholar\.google\.com[^\s)\]]+', line)
-            if urls:
-                current_researcher["scholar_profile"] = urls[0]
-    
-    if current_researcher:
-        researchers.append(current_researcher)
-    
-    # Create table from extracted data
-    if researchers:
-        markdown_table = "| Rank | Name | Affiliation | Email | Scholar Profile |\n"
-        markdown_table += "|------|------|-------------|--------|-----------------|\n"
-        
-        for i, researcher in enumerate(researchers[:top_k], 1):
-            name = researcher.get("name", "Unknown")
-            affiliation = researcher.get("affiliation", "Not specified")
-            email = researcher.get("email", "(not found)")
-            scholar_profile = researcher.get("scholar_profile", "#")
-            
-            markdown_table += f"| {i} | {name} | {affiliation} | {email} | [Profile]({scholar_profile}) |\n"
-        
-        return markdown_table
-    else:
-        return "Could not extract researcher information from the search results."
+# Create the Agno agent
+researcher_agent = Agent(
+    model=Gemini(id="gemini-2.5-flash", api_key=os.environ.get("GEMINI_API_KEY", "")),
+    name="ResearcherFinder",
+    description="Find top academic researchers in specific fields",
+    tools=[ResearcherSearchTool()],
+    instructions=[
+        "Find top 3 researchers for any given topic.",
+        "Return a clean table with: Name, Email, Profile Link, and Information.",
+        "Always return exactly 3 researchers unless specified otherwise.",
+        "Keep the output professional and concise."
+    ],
+    markdown=True
+)
 
 # ---------------------------------------------------
 # AGENTS (Gemini + SerpAPI + Email)
@@ -316,16 +288,16 @@ def extract_researchers_from_text(text: str, top_k: int) -> str:
 #     markdown=True
 # )
 # Update your agent1 to use the new function
-agent1 = Agent(
-    model=Gemini(id="gemini-2.5-flash", api_key=os.environ.get("GEMINI_API_KEY", "")),
-    description="Find top researchers using web search with accurate names and profiles.",
-    tools=[get_top_researchers_gemini],  # Use the new function
-    instructions=[
-        "Use get_top_researchers_gemini(topic, top_k) to find top researchers with accurate full names and profiles.",
-        "Always return a clean Markdown table with names, affiliations, emails, and scholar profiles."
-    ],
-    markdown=True
-)
+# agent1 = Agent(
+#     model=Gemini(id="gemini-2.5-flash", api_key=os.environ.get("GEMINI_API_KEY", "")),
+#     description="Find top researchers using web search with accurate names and profiles.",
+#     tools=[get_top_researchers_gemini],  # Use the new function
+#     instructions=[
+#         "Use get_top_researchers_gemini(topic, top_k) to find top researchers with accurate full names and profiles.",
+#         "Always return a clean Markdown table with names, affiliations, emails, and scholar profiles."
+#     ],
+#     markdown=True
+# )
 
 agent2 = Agent(
     model=Gemini(id="gemini-2.5-flash", api_key=os.environ.get("GEMINI_API_KEY", "")),
@@ -480,11 +452,18 @@ Answer with only the topic, no explanations.
 # ---------------------------------------------------
 # WRAPPER FUNCTIONS (used in Streamlit frontend)
 # ---------------------------------------------------
-def run_agent1(query: str):
-    """Call the first agent to get researcher details."""
-    response = agent1.run(query)
-    return response.content
+# def run_agent1(query: str):
+#     """Call the first agent to get researcher details."""
+#     response = agent1.run(query)
+#     return response.content
 
+def run_agent1(query: str) -> str:
+    """Run the researcher agent"""
+    try:
+        response = researcher_agent.run(query)
+        return response.content
+    except Exception as e:
+        return f"Error: {str(e)}"
 
 def run_agent2(query: str):
     """Call the second agent to send email."""

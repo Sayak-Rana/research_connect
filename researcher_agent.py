@@ -168,3 +168,62 @@ def run_agent2(query: str):
     """Call the second agent to send email."""
     response = agent2.run(query)
     return response.content
+
+import fitz  # PyMuPDF for PDF reading
+
+# ---------------------------------------------------
+# TOOL 3: Extract Topic from Uploaded Research Paper
+# ---------------------------------------------------
+def extract_text_from_pdf(file_path: str) -> str:
+    """Extracts and returns all text from a PDF file."""
+    text = ""
+    with fitz.open(file_path) as pdf:
+        for page in pdf:
+            text += page.get_text()
+    return text.strip()
+
+
+def analyze_paper(file_path: str) -> str:
+    """
+    Extracts the main research topic or keywords from an uploaded paper using Gemini.
+    """
+    paper_text = extract_text_from_pdf(file_path)
+    if not paper_text:
+        return "No readable text found in the uploaded paper."
+
+    print("[DEBUG] Sending paper text to Gemini for analysis...")
+
+    prompt = f"""
+You are a research assistant. Analyze the following research paper text and summarize:
+1. The main research topic or field (e.g., 'Graph Neural Networks', 'Quantum Computing').
+2. 3–5 most relevant keywords.
+
+Paper text (truncated to first 2000 words if long):
+{paper_text[:2000]}
+"""
+
+    # Use Gemini model directly to summarize topic
+    gemini_api_key = os.environ.get("GEMINI_API_KEY", "")
+    if not gemini_api_key:
+        return "Error: GEMINI_API_KEY missing."
+
+    # Using Agno Agent for topic extraction
+    analysis_agent = Agent(
+        model=Gemini(id="gemini-2.5-flash", api_key=gemini_api_key),
+        description="Analyze uploaded paper text and identify its main research topic and keywords.",
+        markdown=True
+    )
+
+    response = analysis_agent.run(prompt)
+    topic_summary = response.content
+
+    return topic_summary
+
+
+# ---------------------------------------------------
+# WRAPPER FOR STREAMLIT
+# ---------------------------------------------------
+def run_agent3(file_path: str):
+    """Analyze a research paper and return topic summary."""
+    return analyze_paper(file_path)
+

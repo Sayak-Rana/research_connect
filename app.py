@@ -8,7 +8,7 @@ st.title("🔍 Research Connect — Find & Mail Researchers")
 
 st.markdown("""
 This app uses **Gemini + SERPAPI** to find top researchers on Google Scholar,  
-and allows you to send the results to your chosen email addresses.
+and allows you to **customize and send the results** to your chosen email addresses.
 """)
 
 # -----------------------------
@@ -34,25 +34,40 @@ if st.button("🔎 Find Top Researchers"):
 # -----------------------------
 if "agent_result" in st.session_state:
     st.markdown("---")
-    st.subheader("✉️ Send Results to Recipients")
+    st.subheader("✉️ Send Customized Email")
 
-    subject = st.text_input("Subject", f"Top 3 Researchers in {topic}")
+    # Subject input
+    subject = st.text_input("Email Subject", f"Top 3 Researchers in {topic}")
 
+    # Receiver emails
     receiver_input = st.text_area(
         "Enter Receiver Email IDs (comma-separated):",
         placeholder="e.g. alice@gmail.com, bob@iitk.ac.in"
     )
 
+    # Email body (customizable)
+    default_body = f"""Hi,
+
+Below are the top researchers found for your requested topic "{topic}":
+
+{st.session_state["agent_result"]}
+
+Best regards,
+Sayak Rana
+"""
+    email_body = st.text_area("Customize Email Body", default_body, height=300)
+
+    # Send button
     if st.button("🚀 Send Email"):
         if not receiver_input.strip():
             st.error("Please enter at least one receiver email address.")
         else:
             receivers = [e.strip() for e in re.split(r"[,\s]+", receiver_input) if e.strip()]
-            ans = st.session_state["agent_result"]
+            ans = email_body  # use customized email body
 
             with st.spinner("Sending email via Gemini agent..."):
                 try:
-                    # Convert Python list to string so agent2 can pass it correctly
+                    # Pass everything (including custom message)
                     res = run_agent2(
                         f"send_mail(ans={ans!r}, subject={subject!r}, receivers={receivers!r})"
                     )

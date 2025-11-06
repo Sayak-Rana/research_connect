@@ -221,9 +221,91 @@ agent2 = Agent(
     markdown=False
 )
 
-# ---------------------------------------------------
-# TOOL 3: Analyze Uploaded Research Paper → Extract Topic + Keywords
-# ---------------------------------------------------
+# # ---------------------------------------------------
+# # TOOL 3: Analyze Uploaded Research Paper → Extract Topic + Keywords
+# # ---------------------------------------------------
+# def extract_text_from_pdf(file_path: str) -> str:
+#     """Extracts and returns all text from a PDF file."""
+#     text = ""
+#     with fitz.open(file_path) as pdf:
+#         for page in pdf:
+#             text += page.get_text()
+#     return text.strip()
+
+
+# def analyze_paper(file_path: str) -> str:
+#     """
+#     Extracts the main research topic or keywords from an uploaded paper using Gemini (JSON format).
+#     """
+#     paper_text = extract_text_from_pdf(file_path)
+#     if not paper_text:
+#         return "No readable text found in the uploaded paper."
+
+#     print("[DEBUG] Sending paper text to Gemini for analysis...")
+
+#     # Use more text for better analysis (increased from 2000 to 4000 characters)
+#     text_sample = paper_text[:4000] if len(paper_text) > 4000 else paper_text
+
+#     prompt = f"""
+# You are a research assistant. Analyze the following research paper text.
+
+# Your task:
+# - Identify the **main research topic** (1 short phrase, no explanation)
+# - Identify 3–5 **keywords**
+
+# Return the result ONLY in **JSON format**:
+# {{
+#   "topic": "Main topic name",
+#   "keywords": ["keyword1", "keyword2", "keyword3"]
+# }}
+
+# Paper text (truncated):
+# {text_sample}
+
+# IMPORTANT: Return ONLY valid JSON, no other text.
+# """
+
+#     gemini_api_key = os.environ.get("GEMINI_API_KEY", "")
+#     if not gemini_api_key:
+#         return "Error: GEMINI_API_KEY missing."
+
+#     analysis_agent = Agent(
+#         model=Gemini(id="gemini-2.5-flash", api_key=gemini_api_key),
+#         description="Analyze uploaded paper text and identify its main research topic and keywords.",
+#         markdown=False
+#     )
+
+#     try:
+#         response = analysis_agent.run(prompt)
+#         topic_summary = response.content.strip()
+        
+#         # Clean the response to extract JSON
+#         if topic_summary.startswith("```json"):
+#             topic_summary = topic_summary[7:]
+#         if topic_summary.endswith("```"):
+#             topic_summary = topic_summary[:-3]
+        
+#         # Parse JSON output safely
+#         result_json = json.loads(topic_summary)
+#         main_topic = result_json.get("topic", "").strip()
+#         keywords = result_json.get("keywords", [])
+        
+#         if not main_topic:
+#             return "Could not extract a clear topic from the paper."
+
+#         keywords_text = ", ".join(keywords) if keywords else "Not found"
+#         return f"**Main Research Topic:** {main_topic}\n\n**Keywords:** {keywords_text}"
+        
+#     except json.JSONDecodeError as e:
+#         print(f"[ERROR] Failed to parse JSON from Gemini: {e}")
+#         print(f"[DEBUG] Raw response: {topic_summary}")
+#         return "Could not extract a clear topic from the paper. The analysis failed to return proper format."
+#     except Exception as e:
+#         print(f"[ERROR] Analysis failed: {e}")
+#         return f"Error analyzing paper: {str(e)}"
+
+import fitz  # PyMuPDF for PDF reading
+
 def extract_text_from_pdf(file_path: str) -> str:
     """Extracts and returns all text from a PDF file."""
     text = ""
@@ -232,78 +314,51 @@ def extract_text_from_pdf(file_path: str) -> str:
             text += page.get_text()
     return text.strip()
 
-
 def analyze_paper(file_path: str) -> str:
     """
-    Extracts the main research topic or keywords from an uploaded paper using Gemini (JSON format).
+    SIMPLE AND RELIABLE version for paper analysis.
     """
     paper_text = extract_text_from_pdf(file_path)
     if not paper_text:
         return "No readable text found in the uploaded paper."
 
-    print("[DEBUG] Sending paper text to Gemini for analysis...")
-
-    # Use more text for better analysis (increased from 2000 to 4000 characters)
-    text_sample = paper_text[:4000] if len(paper_text) > 4000 else paper_text
+    # Use first 5000 characters for analysis
+    text_sample = paper_text[:5000]
 
     prompt = f"""
-You are a research assistant. Analyze the following research paper text.
+Based on this research paper text, what is the main research topic? 
+Return just the topic name as a short phrase (2-5 words).
 
-Your task:
-- Identify the **main research topic** (1 short phrase, no explanation)
-- Identify 3–5 **keywords**
-
-Return the result ONLY in **JSON format**:
-{{
-  "topic": "Main topic name",
-  "keywords": ["keyword1", "keyword2", "keyword3"]
-}}
-
-Paper text (truncated):
+Paper excerpt:
 {text_sample}
 
-IMPORTANT: Return ONLY valid JSON, no other text.
+Answer with only the topic, no explanations.
 """
 
     gemini_api_key = os.environ.get("GEMINI_API_KEY", "")
     if not gemini_api_key:
         return "Error: GEMINI_API_KEY missing."
 
-    analysis_agent = Agent(
-        model=Gemini(id="gemini-2.5-flash", api_key=gemini_api_key),
-        description="Analyze uploaded paper text and identify its main research topic and keywords.",
-        markdown=False
-    )
-
     try:
+        analysis_agent = Agent(
+            model=Gemini(id="gemini-2.5-flash", api_key=gemini_api_key),
+            description="Extract main research topic from paper text",
+            markdown=False
+        )
+        
         response = analysis_agent.run(prompt)
-        topic_summary = response.content.strip()
+        main_topic = response.content.strip()
         
-        # Clean the response to extract JSON
-        if topic_summary.startswith("```json"):
-            topic_summary = topic_summary[7:]
-        if topic_summary.endswith("```"):
-            topic_summary = topic_summary[:-3]
+        print(f"[DEBUG] Extracted topic: {main_topic}")
         
-        # Parse JSON output safely
-        result_json = json.loads(topic_summary)
-        main_topic = result_json.get("topic", "").strip()
-        keywords = result_json.get("keywords", [])
-        
-        if not main_topic:
+        if main_topic and len(main_topic) > 3:
+            return f"**Main Research Topic:** {main_topic}\n\n**Keywords:** (Use topic for search)"
+        else:
             return "Could not extract a clear topic from the paper."
-
-        keywords_text = ", ".join(keywords) if keywords else "Not found"
-        return f"**Main Research Topic:** {main_topic}\n\n**Keywords:** {keywords_text}"
-        
-    except json.JSONDecodeError as e:
-        print(f"[ERROR] Failed to parse JSON from Gemini: {e}")
-        print(f"[DEBUG] Raw response: {topic_summary}")
-        return "Could not extract a clear topic from the paper. The analysis failed to return proper format."
+            
     except Exception as e:
         print(f"[ERROR] Analysis failed: {e}")
         return f"Error analyzing paper: {str(e)}"
-
 
 # ---------------------------------------------------
 # WRAPPER FUNCTIONS (used in Streamlit frontend)

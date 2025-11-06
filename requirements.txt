@@ -5,3 +5,4 @@ google-genai
 google-search-results
 yagmail
 python-dotenv
+PyMuPDF

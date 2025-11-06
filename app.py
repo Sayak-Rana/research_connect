@@ -85,8 +85,7 @@ Below are the top researchers found for your requested topic "{st.session_state.
 
 {st.session_state["agent_result"]}
 
-Best regards,
-Sayak Rana
+Thanks.
 """
     email_body = st.text_area("Customize Email Body", default_body, height=300)
 

@@ -55,7 +55,7 @@ def get_top_researchers(topic: str, top_k: int = 3) -> str:
 
             name = name.strip()
 
-            # Skip overly short or initial-only names (we'll fix later)
+            # Skip overly short names
             if len(name) <= 2:
                 continue
 
@@ -83,63 +83,15 @@ def get_top_researchers(topic: str, top_k: int = 3) -> str:
     ranked = sorted(authors_data.items(), key=lambda kv: kv[1]["count"], reverse=True)[:top_k]
 
     # -------------------------------
-    # Use Gemini to expand short names into full names if needed
+    # REMOVED UNRELIABLE NAME EXPANSION
+    # We'll use the names as returned by Google Scholar
     # -------------------------------
-    gemini_api_key = os.environ.get("GEMINI_API_KEY", "")
-    if gemini_api_key:
-        cleanup_agent = Agent(
-            model=Gemini(id="gemini-2.5-flash", api_key=gemini_api_key),
-            description="Expand abbreviated author names to their full likely names.",
-            markdown=False
-        )
-        
-        # Filter only names that look abbreviated (contain single letters with dots or short names)
-        short_names_to_expand = []
-        for name, _ in ranked:
-            # Check if name looks abbreviated (has single letters with dots or is very short)
-            if (re.search(r'\b[A-Z]\.', name) or 
-                len(name.split()) <= 2 and any(len(part) == 1 for part in name.split())):
-                short_names_to_expand.append(name)
-        
-        if short_names_to_expand:
-            prompt = f"""
-Some researcher names below may be abbreviated. For each name, suggest the most likely full name.
-Return ONLY a JSON object mapping abbreviated names to full names.
-
-Example:
-Input: ["Y Ding", "S Jehelka", "A Smith"]
-Output: {{"Y Ding": "Yong Ding", "S Jehelka": "Sanjay Jehelka", "A Smith": "Adam Smith"}}
-
-Names to expand: {short_names_to_expand}
-
-Return ONLY the JSON, no other text.
-"""
-            try:
-                response = cleanup_agent.run(prompt)
-                # Clean the response to extract only JSON
-                response_text = response.content.strip()
-                if response_text.startswith("```json"):
-                    response_text = response_text[7:]
-                if response_text.endswith("```"):
-                    response_text = response_text[:-3]
-                
-                name_map = json.loads(response_text)
-                
-                # Update the ranked list with expanded names
-                updated_ranked = []
-                for name, info in ranked:
-                    full_name = name_map.get(name, name)
-                    updated_ranked.append((full_name, info))
-                ranked = updated_ranked
-                
-            except Exception as e:
-                print(f"[WARN] Name cleanup failed: {e}. Using original names.")
 
     # -------------------------------
     # Create final Markdown table
     # -------------------------------
-    markdown_table = "| Rank | Full Name | Emails (found) | Profile Link |\n"
-    markdown_table += "|------|-----------|----------------|--------------|\n"
+    markdown_table = "| Rank | Name | Emails (found) | Profile Link |\n"
+    markdown_table += "|------|------|----------------|--------------|\n"
 
     for i, (name, info) in enumerate(ranked, start=1):
         emails_list = ", ".join(sorted(info["emails"])) if info["emails"] else "(not found)"

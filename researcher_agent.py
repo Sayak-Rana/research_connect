@@ -16,10 +16,94 @@ load_dotenv()
 # ---------------------------------------------------
 # TOOL 1: Fetch Top Researchers from Google Scholar
 # ---------------------------------------------------
+# def get_top_researchers(topic: str, top_k: int = 3) -> str:
+#     """
+#     Searches Google Scholar using SerpAPI for the given topic and returns
+#     a Markdown table of the top researchers with full names and profile links.
+#     """
+#     print(f"[DEBUG] Searching Google Scholar for: {topic!r}")
+
+#     serp_api_key = os.environ.get("SERPAPI_KEY")
+#     if not serp_api_key:
+#         return "ERROR: SERPAPI_KEY not found in environment variables."
+
+#     params = {
+#         "engine": "google_scholar",
+#         "q": topic,
+#         "num": "30",
+#         "api_key": serp_api_key
+#     }
+
+#     search = GoogleSearch(params)
+#     results = search.get_dict().get("organic_results", [])
+#     if not results:
+#         return "No results found."
+
+#     authors_data = {}
+
+#     for paper in results:
+#         snippet = paper.get("snippet", "") or ""
+#         emails_found = re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", snippet)
+
+#         authors = paper.get("publication_info", {}).get("authors", [])
+#         for author in authors:
+#             name = author.get("name")
+#             profile_link = author.get("link") or author.get("profile") or None
+
+#             if not name:
+#                 continue
+
+#             name = name.strip()
+
+#             # Skip overly short names
+#             if len(name) <= 2:
+#                 continue
+
+#             if name not in authors_data:
+#                 authors_data[name] = {
+#                     "count": 0,
+#                     "profile": profile_link or "(profile not available)",
+#                     "emails": set()
+#                 }
+
+#             authors_data[name]["count"] += 1
+#             for e in emails_found:
+#                 authors_data[name]["emails"].add(e)
+
+#             for v in author.values():
+#                 if isinstance(v, str):
+#                     found = re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", v)
+#                     for f in found:
+#                         authors_data[name]["emails"].add(f)
+
+#     if not authors_data:
+#         return "No authors found."
+
+#     # Rank by frequency
+#     ranked = sorted(authors_data.items(), key=lambda kv: kv[1]["count"], reverse=True)[:top_k]
+
+#     # -------------------------------
+#     # REMOVED UNRELIABLE NAME EXPANSION
+#     # We'll use the names as returned by Google Scholar
+#     # -------------------------------
+
+#     # -------------------------------
+#     # Create final Markdown table
+#     # -------------------------------
+#     markdown_table = "| Rank | Name | Emails (found) | Profile Link |\n"
+#     markdown_table += "|------|------|----------------|--------------|\n"
+
+#     for i, (name, info) in enumerate(ranked, start=1):
+#         emails_list = ", ".join(sorted(info["emails"])) if info["emails"] else "(not found)"
+#         profile = info["profile"]
+#         markdown_table += f"| {i} | {name} | {emails_list} | {profile} |\n"
+
+#     return markdown_table
+
 def get_top_researchers(topic: str, top_k: int = 3) -> str:
     """
     Searches Google Scholar using SerpAPI for the given topic and returns
-    a Markdown table of the top researchers with full names and profile links.
+    only researchers with valid Google Scholar profiles and full names.
     """
     print(f"[DEBUG] Searching Google Scholar for: {topic!r}")
 
@@ -30,7 +114,7 @@ def get_top_researchers(topic: str, top_k: int = 3) -> str:
     params = {
         "engine": "google_scholar",
         "q": topic,
-        "num": "30",
+        "num": "50",  # Get more results to filter better
         "api_key": serp_api_key
     }
 
@@ -55,15 +139,28 @@ def get_top_researchers(topic: str, top_k: int = 3) -> str:
 
             name = name.strip()
 
-            # Skip overly short names
-            if len(name) <= 2:
+            # Skip if no valid Google Scholar profile
+            if not profile_link or "scholar.google.com" not in profile_link:
+                continue
+
+            # Skip if name is too short or doesn't look like full name
+            if len(name) <= 2 or len(name.split()) < 2:
+                continue
+
+            # Skip names that are clearly abbreviated (contain single letters with dots)
+            if re.search(r'\b[A-Z]\.', name):
+                continue
+
+            # Skip names that are too short (less than 5 characters total)
+            if len(name.replace(' ', '')) < 5:
                 continue
 
             if name not in authors_data:
                 authors_data[name] = {
                     "count": 0,
-                    "profile": profile_link or "(profile not available)",
-                    "emails": set()
+                    "profile": profile_link,
+                    "emails": set(),
+                    "papers_count": 0
                 }
 
             authors_data[name]["count"] += 1
@@ -77,29 +174,38 @@ def get_top_researchers(topic: str, top_k: int = 3) -> str:
                         authors_data[name]["emails"].add(f)
 
     if not authors_data:
-        return "No authors found."
+        return "No researchers with valid Google Scholar profiles found."
 
-    # Rank by frequency
-    ranked = sorted(authors_data.items(), key=lambda kv: kv[1]["count"], reverse=True)[:top_k]
+    # Rank by frequency and filter for quality
+    ranked = []
+    for name, info in authors_data.items():
+        # Only include researchers that appear multiple times (more established)
+        if info["count"] >= 2:  # At least 2 papers in this topic
+            ranked.append((name, info))
 
-    # -------------------------------
-    # REMOVED UNRELIABLE NAME EXPANSION
-    # We'll use the names as returned by Google Scholar
-    # -------------------------------
+    if not ranked:
+        return "No established researchers found with multiple publications in this topic."
+
+    # Sort by frequency (number of papers)
+    ranked.sort(key=lambda kv: kv[1]["count"], reverse=True)
+    
+    # Take top K
+    ranked = ranked[:top_k]
 
     # -------------------------------
     # Create final Markdown table
     # -------------------------------
-    markdown_table = "| Rank | Name | Emails (found) | Profile Link |\n"
-    markdown_table += "|------|------|----------------|--------------|\n"
+    markdown_table = "| Rank | Name | Email | Google Scholar Profile | Papers Found |\n"
+    markdown_table += "|------|------|-------|----------------------|-------------|\n"
 
     for i, (name, info) in enumerate(ranked, start=1):
-        emails_list = ", ".join(sorted(info["emails"])) if info["emails"] else "(not found)"
+        emails_list = ", ".join(sorted(info["emails"])) if info["emails"] else "Not available"
         profile = info["profile"]
-        markdown_table += f"| {i} | {name} | {emails_list} | {profile} |\n"
+        papers_count = info["count"]
+        
+        markdown_table += f"| {i} | **{name}** | {emails_list} | [View Profile]({profile}) | {papers_count} |\n"
 
     return markdown_table
-
 
 # ---------------------------------------------------
 # TOOL 2: Send Email (with dynamic receiver list)

@@ -121,8 +121,6 @@ def send_mail(ans: str, subject: str = "Top Researchers - Auto Update", receiver
 
     if not receivers:
         receivers = [
-            "sayakrana108@gmail.com",
-            "sayak.rana2001@gmail.com",
             "rana.sayak.2001@gmail.com"
         ]
 

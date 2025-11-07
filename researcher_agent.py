@@ -266,19 +266,19 @@ def extract_text_from_pdf(file_path: str) -> str:
 
 def analyze_paper(file_path: str) -> str:
     """
-    Advanced version: Analyzes the uploaded research paper, identifies its main topic,
-    and finds top researchers associated with that domain.
+    Analyzes a research paper to extract main field and related top researchers.
+    Returns a formatted markdown table compatible with Streamlit + mailing.
     """
     paper_text = extract_text_from_pdf(file_path)
     if not paper_text:
         return "No readable text found in the uploaded paper."
 
-    # Clean text: remove noise, LaTeX junk
+    # Clean and compress text
     clean_text = re.sub(r"\s+", " ", paper_text)
     clean_text = re.sub(r"[^a-zA-Z0-9\s.,;:!?-]", " ", clean_text)
     clean_text = clean_text.strip()
 
-    # Extract candidate title (first few lines are often the title)
+    # Extract title-like line
     lines = clean_text.split("\n")
     candidate_title = " ".join(lines[:3]).strip()[:200]
 
@@ -288,50 +288,50 @@ def analyze_paper(file_path: str) -> str:
     if not gemini_api_key:
         return "Error: GEMINI_API_KEY missing."
 
-    # Step 1: Ask Gemini to infer the research domain and top researchers
     prompt = f"""
 You are a research analysis expert.
 
-Given the following research paper content (title + abstract/introduction),
-1. Identify the **main field of study** (concise, e.g. "Transformer Neural Networks", "Computer Vision").
-2. List **3–5 most influential researchers** currently known for work in this field (well-known names).
-3. Return results ONLY in JSON format:
+Given the following research paper (title + abstract/introduction), identify:
+1. The **main research field** (short phrase).
+2. 3–5 most influential researchers in this domain, including affiliation.
+
+Return strictly in JSON:
 {{
-  "field": "Main field of study",
+  "field": "Main field",
   "researchers": [
-    {{"name": "Researcher Full Name", "affiliation": "Known organization or lab"}}
+    {{"name": "Full Name", "affiliation": "Affiliation"}}
   ]
 }}
 
 Paper content (truncated):
 Title: {candidate_title}
 
-Text excerpt:
+Text:
 {clean_text[:4000]}
 """
 
     analysis_agent = Agent(
         model=Gemini(id="gemini-2.5-flash", api_key=gemini_api_key),
-        description="Analyze research paper text to find related domain and top researchers.",
+        description="Extracts research domain and top contributors from uploaded paper.",
         markdown=False
     )
 
     response = analysis_agent.run(prompt)
-    summary_text = response.content.strip()
+    text = response.content.strip()
 
-    # Parse Gemini JSON response
+    # Try to parse JSON output
     try:
-        result_json = json.loads(summary_text)
-        field = result_json.get("field", "").strip()
-        researcher_list = result_json.get("researchers", [])
+        data = json.loads(text)
+        field = data.get("field", "Unknown Field")
+        researchers = data.get("researchers", [])
     except json.JSONDecodeError:
-        print("[WARN] Gemini failed to return JSON; fallback to plain summary.")
-        return summary_text
+        print("[WARN] Gemini did not return valid JSON. Returning raw text.")
+        return text
 
-    if not researcher_list:
-        return f"Could not identify researchers from this paper.\n\n**Field:** {field or 'Unknown'}"
+    if not researchers:
+        return f"Could not detect specific researchers.\n\n**Field:** {field}"
 
-    # Step 2: Validate with Google Scholar (SERPAPI)
+    # Validate and enrich with Google Scholar links
     serp_api_key = os.environ.get("SERPAPI_KEY")
     if not serp_api_key:
         return "Error: SERPAPI_KEY missing."
@@ -339,26 +339,23 @@ Text excerpt:
     markdown_table = "| Rank | Researcher | Affiliation | Profile Link |\n"
     markdown_table += "|------|-------------|-------------|---------------|\n"
 
-    for i, r in enumerate(researcher_list[:3], start=1):
-        name = r.get("name", "")
-        affiliation = r.get("affiliation", "")
+    for i, r in enumerate(researchers[:3], start=1):
+        name = r.get("name", "Unknown")
+        affiliation = r.get("affiliation", "(unknown)")
 
-        params = {
-            "engine": "google_scholar_profiles",
-            "mauthors": name,
-            "api_key": serp_api_key
-        }
-
-        search = GoogleSearch(params)
-        results = search.get_dict().get("profiles", [])
-        if results:
-            profile_link = results[0].get("link", "(not found)")
-        else:
+        # Try Google Scholar lookup
+        try:
+            params = {"engine": "google_scholar_profiles", "mauthors": name, "api_key": serp_api_key}
+            results = GoogleSearch(params).get_dict().get("profiles", [])
+            profile_link = results[0].get("link", "(not found)") if results else "(not found)"
+        except Exception as e:
+            print(f"[WARN] Scholar lookup failed for {name}: {e}")
             profile_link = "(not found)"
 
-        markdown_table += f"| {i} | {name} | {affiliation or '(not found)'} | {profile_link} |\n"
+        markdown_table += f"| {i} | {name} | {affiliation} | {profile_link} |\n"
 
     return f"**Main Field:** {field}\n\n{markdown_table}"
+
 
 
 # ---------------------------------------------------

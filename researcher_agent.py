@@ -266,95 +266,51 @@ def extract_text_from_pdf(file_path: str) -> str:
 
 def analyze_paper(file_path: str) -> str:
     """
-    Analyzes a research paper to extract main field and related top researchers.
-    Returns a formatted markdown table compatible with Streamlit + mailing.
+    Extracts the main research topic from an uploaded paper using Gemini.
     """
     paper_text = extract_text_from_pdf(file_path)
     if not paper_text:
         return "No readable text found in the uploaded paper."
 
-    # Clean and compress text
-    clean_text = re.sub(r"\s+", " ", paper_text)
-    clean_text = re.sub(r"[^a-zA-Z0-9\s.,;:!?-]", " ", clean_text)
-    clean_text = clean_text.strip()
+    # Use first 3000 characters for analysis
+    text_sample = paper_text[:3000]
 
-    # Extract title-like line
-    lines = clean_text.split("\n")
-    candidate_title = " ".join(lines[:3]).strip()[:200]
+    prompt = f"""
+Analyze this research paper text and extract ONLY the main research topic.
+Return just the topic as a short phrase (2-5 words maximum).
 
-    print(f"[DEBUG] Extracted possible title: {candidate_title}")
+Paper text:
+{text_sample}
+
+Return ONLY the topic phrase, nothing else.
+"""
 
     gemini_api_key = os.environ.get("GEMINI_API_KEY", "")
     if not gemini_api_key:
         return "Error: GEMINI_API_KEY missing."
 
-    prompt = f"""
-You are a research analysis expert.
-
-Given the following research paper (title + abstract/introduction), identify:
-1. The **main research field** (short phrase).
-2. 3–5 most influential researchers in this domain, including affiliation.
-
-Return strictly in JSON:
-{{
-  "field": "Main field",
-  "researchers": [
-    {{"name": "Full Name", "affiliation": "Affiliation"}}
-  ]
-}}
-
-Paper content (truncated):
-Title: {candidate_title}
-
-Text:
-{clean_text[:4000]}
-"""
-
-    analysis_agent = Agent(
-        model=Gemini(id="gemini-2.5-flash", api_key=gemini_api_key),
-        description="Extracts research domain and top contributors from uploaded paper.",
-        markdown=False
-    )
-
-    response = analysis_agent.run(prompt)
-    text = response.content.strip()
-
-    # Try to parse JSON output
     try:
-        data = json.loads(text)
-        field = data.get("field", "Unknown Field")
-        researchers = data.get("researchers", [])
-    except json.JSONDecodeError:
-        print("[WARN] Gemini did not return valid JSON. Returning raw text.")
-        return text
-
-    if not researchers:
-        return f"Could not detect specific researchers.\n\n**Field:** {field}"
-
-    # Validate and enrich with Google Scholar links
-    serp_api_key = os.environ.get("SERPAPI_KEY")
-    if not serp_api_key:
-        return "Error: SERPAPI_KEY missing."
-
-    markdown_table = "| Rank | Researcher | Affiliation | Profile Link |\n"
-    markdown_table += "|------|-------------|-------------|---------------|\n"
-
-    for i, r in enumerate(researchers[:3], start=1):
-        name = r.get("name", "Unknown")
-        affiliation = r.get("affiliation", "(unknown)")
-
-        # Try Google Scholar lookup
-        try:
-            params = {"engine": "google_scholar_profiles", "mauthors": name, "api_key": serp_api_key}
-            results = GoogleSearch(params).get_dict().get("profiles", [])
-            profile_link = results[0].get("link", "(not found)") if results else "(not found)"
-        except Exception as e:
-            print(f"[WARN] Scholar lookup failed for {name}: {e}")
-            profile_link = "(not found)"
-
-        markdown_table += f"| {i} | {name} | {affiliation} | {profile_link} |\n"
-
-    return f"**Main Field:** {field}\n\n{markdown_table}"
+        analysis_agent = Agent(
+            model=Gemini(id="gemini-2.5-flash", api_key=gemini_api_key),
+            description="Extract main research topic from paper text",
+            markdown=False
+        )
+        
+        response = analysis_agent.run(prompt)
+        main_topic = response.content.strip()
+        
+        # Clean the response
+        main_topic = re.sub(r'["\']', '', main_topic)  # Remove quotes
+        main_topic = main_topic.split('\n')[0]  # Take only first line
+        main_topic = main_topic.strip()
+        
+        if main_topic and len(main_topic) > 3 and len(main_topic.split()) <= 5:
+            return f"**Main Research Topic:** {main_topic}"
+        else:
+            return "Could not extract a clear topic from the paper."
+            
+    except Exception as e:
+        return f"Error analyzing paper: {str(e)}"
 
 
 

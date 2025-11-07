@@ -63,7 +63,8 @@ if uploaded_file:
             # Extract main topic cleanly from the markdown returned by agent3
             match = re.search(r"\*\*Main Research Topic:\*\*\s*(.*?)(?:\n|\*|$)", topic_summary)
             if match:
-                extracted_topic = match.group(1).strip()
+                # extracted_topic = match.group(1).strip()
+                extracted_topic = match.group(2).strip()
                 # Remove any trailing markdown formatting
                 extracted_topic = re.sub(r'\*\*.*', '', extracted_topic).strip()
             else:

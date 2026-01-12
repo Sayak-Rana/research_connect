@@ -1,5 +1,15 @@
+# import streamlit as st
+# from researcher_agent import run_agent1, run_agent2, run_agent3
+# import re
+# import tempfile
+# import os
+
+# st.set_page_config(page_title="Research Connect", page_icon="🔬", layout="centered")
+
+# st.title("Research Connect — Find & Mail Researchers")
 import streamlit as st
-from researcher_agent import run_agent1, run_agent2, run_agent3
+# Add run_evaluation to the imports
+from researcher_agent import run_agent1, run_agent2, run_agent3, run_evaluation 
 import re
 import tempfile
 import os
